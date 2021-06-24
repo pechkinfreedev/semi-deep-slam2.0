@@ -1,0 +1,297 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  ProbabilityMapping.cc
+ *
+ *    Description:
+ *
+ *        Version:  0.1
+ *        Created:  01/21/2016 10:39:12 PM
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  Josh Tang, Rebecca Frederick
+ *
+ *        version: 1.0
+ *        created: 8/9/2016
+ *        Log: fix a lot of bug, Almost rewrite the code.
+ *
+ *        author: He Yijia
+ * *
+ *        Version: 1.1
+ *        Created: 05/18/2017
+ *        Author: Shida He
+ *
+ * =====================================================================================
+ */
+
+#include <cmath>
+#include <opencv2/opencv.hpp>
+#include <numeric>
+#include "ProbabilityMapping.h"
+#include "KeyFrame.h"
+#include "MapPoint.h"
+#include "ORBmatcher.h"
+#include "LocalMapping.h"
+#include <stdint.h>
+#include <stdio.h>
+
+#include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
+#include <fstream>
+
+#define OnlineLoop
+#define ForceRealTime  //if uncommented, main tracking thread will wait for this thread to finish before processing next frame
+
+/// Function prototype for DetectEdgesByED exported by EDLinesLib.a
+LS *DetectLinesByED(unsigned char *srcImg, int width, int height, int *pNoLines);
+
+void saveMatToCsv(cv::Mat data, std::string filename)
+{
+    std::ofstream outputFile(filename.c_str());
+    outputFile << cv::format(data,"CSV")<<std::endl;
+    outputFile.close();
+}
+
+template<typename T>
+float bilinear(const cv::Mat& img, const float& y, const float& x)
+{
+    int x0 = (int)std::floor(x);
+    int y0 = (int )std::floor(y);
+    int x1 = x0 + 1;
+    int y1 =  y0 + 1;
+
+    float x0_weight = x1 - x;
+    float y0_weight = y1 - y;
+    float x1_weight = 1.0f - x0_weight;
+    float y1_weight = 1.0f - y0_weight;
+/*
+    if(x1 >= img.cols || y1 >= img.rows)
+    {
+        return 1000;   // return a large error
+    }
+*/
+    //  std::cout<<"image: "<<(float) img.at<T>(y0 , x0 )<<"  "<<(float) img.at<T>(y1 , x1 )<<"  "<< (float)img.at<T>(y1 , x0 )<<"  "<<(float) img.at<T>(y0 , x1 )<<std::endl;
+//    float interpolated =
+//            img.at<T>(y0 , x0 ) * x0_weight + img.at<T>(y0 , x1)* x1_weight +
+//            img.at<T>(y1 , x0 ) * x0_weight + img.at<T>(y1 , x1)* x1_weight +
+//            img.at<T>(y0 , x0 ) * y0_weight + img.at<T>(y1 , x0)* y1_weight +
+//            img.at<T>(y0 , x1 ) * y0_weight + img.at<T>(y1 , x1)* y1_weight ;
+    float interpolated = img.at<T>(y0,x0) * x0_weight * y0_weight +
+                         img.at<T>(y0,x1) * x1_weight * y0_weight +
+                         img.at<T>(y1,x0) * x0_weight * y1_weight +
+                         img.at<T>(y1,x1) * x1_weight * y1_weight;
+
+    return interpolated;
+}
+
+template<typename T>
+float ylinear(const cv::Mat& img, const float& y, const float& x)
+{
+    int x0 = (int)std::floor(x);
+    assert((float)x0 == x);
+    int y0 = (int)std::floor(y);
+    int y1 =  y0 + 1;
+
+    float y0_weight = y1 - y;
+    float y1_weight = y - y0;
+
+    float interpolated = img.at<T>(y0,x0) * y0_weight +
+                         img.at<T>(y1,x0) * y1_weight;
+
+    return interpolated;
+}
+
+template<typename T>
+float yangle(const cv::Mat& img, const float& y, const float& x)
+{
+    int x0 = (int)std::floor(x);
+    assert((float)x0 == x);
+    int y0 = (int)std::floor(y);
+    int y1 =  y0 + 1;
+
+    float y0_weight = y1 - y;
+    float y1_weight = y - y0;
+
+    float a0 = img.at<T>(y0,x0);
+    float a1 = img.at<T>(y1,x0);
+
+    if (abs(a0-a1) < 180){
+        return a0 * y0_weight + a1 * y1_weight;
+    }else{
+        if(a0 < a1){
+            a0 += 360;
+        } else {
+            a1 += 360;
+        }
+        float inter = a0 * y0_weight + a1 * y1_weight;
+        if (inter >= 360){
+            inter -= 360;
+        }
+        return inter;
+    }
+}
+
+
+ProbabilityMapping::ProbabilityMapping(ORB_SLAM2::Map* pMap):mpMap(pMap)
+{
+    mbFinishRequested = false; //init
+    mbFinished = false;
+}
+
+void ProbabilityMapping::Run()
+{
+    while(1)
+    {
+        if(CheckFinish()) break;
+        //TestSemiDenseViewer();
+#ifdef OnlineLoop
+//        struct timespec start, finish/*
+ * =====================================================================================
+ *
+ *       Filename:  ProbabilityMapping.cc
+ *
+ *    Description:
+ *
+ *        Version:  0.1
+ *        Created:  01/21/2016 10:39:12 PM
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  Josh Tang, Rebecca Frederick
+ *
+ *        version: 1.0
+ *        created: 8/9/2016
+ *        Log: fix a lot of bug, Almost rewrite the code.
+ *
+ *        author: He Yijia
+ * *
+ *        Version: 1.1
+ *        Created: 05/18/2017
+ *        Author: Shida He
+ *
+ * =====================================================================================
+ */
+
+#include <cmath>
+#include <opencv2/opencv.hpp>
+#include <numeric>
+#include "ProbabilityMapping.h"
+#include "KeyFrame.h"
+#include "MapPoint.h"
+#include "ORBmatcher.h"
+#include "LocalMapping.h"
+#include <stdint.h>
+#include <stdio.h>
+
+#include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
+#include <fstream>
+
+#define OnlineLoop
+#define ForceRealTime  //if uncommented, main tracking thread will wait for this thread to finish before processing next frame
+
+/// Function prototype for DetectEdgesByED exported by EDLinesLib.a
+LS *DetectLinesByED(unsigned char *srcImg, int width, int height, int *pNoLines);
+
+void saveMatToCsv(cv::Mat data, std::string filename)
+{
+    std::ofstream outputFile(filename.c_str());
+    outputFile << cv::format(data,"CSV")<<std::endl;
+    outputFile.close();
+}
+
+template<typename T>
+float bilinear(const cv::Mat& img, const float& y, const float& x)
+{
+    int x0 = (int)std::floor(x);
+    int y0 = (int )std::floor(y);
+    int x1 = x0 + 1;
+    int y1 =  y0 + 1;
+
+    float x0_weight = x1 - x;
+    float y0_weight = y1 - y;
+    float x1_weight = 1.0f - x0_weight;
+    float y1_weight = 1.0f - y0_weight;
+/*
+    if(x1 >= img.cols || y1 >= img.rows)
+    {
+        return 1000;   // return a large error
+    }
+*/
+    //  std::cout<<"image: "<<(float) img.at<T>(y0 , x0 )<<"  "<<(float) img.at<T>(y1 , x1 )<<"  "<< (float)img.at<T>(y1 , x0 )<<"  "<<(float) img.at<T>(y0 , x1 )<<std::endl;
+//    float interpolated =
+//            img.at<T>(y0 , x0 ) * x0_weight + img.at<T>(y0 , x1)* x1_weight +
+//            img.at<T>(y1 , x0 ) * x0_weight + img.at<T>(y1 , x1)* x1_weight +
+//            img.at<T>(y0 , x0 ) * y0_weight + img.at<T>(y1 , x0)* y1_weight +
+//            img.at<T>(y0 , x1 ) * y0_weight + img.at<T>(y1 , x1)* y1_weight ;
+    float interpolated = img.at<T>(y0,x0) * x0_weight * y0_weight +
+                         img.at<T>(y0,x1) * x1_weight * y0_weight +
+                         img.at<T>(y1,x0) * x0_weight * y1_weight +
+                         img.at<T>(y1,x1) * x1_weight * y1_weight;
+
+    return interpolated;
+}
+
+template<typename T>
+float ylinear(const cv::Mat& img, const float& y, const float& x)
+{
+    int x0 = (int)std::floor(x);
+    assert((float)x0 == x);
+    int y0 = (int)std::floor(y);
+    int y1 =  y0 + 1;
+
+    float y0_weight = y1 - y;
+    float y1_weight = y - y0;
+
+    float interpolated = img.at<T>(y0,x0) * y0_weight +
+                         img.at<T>(y1,x0) * y1_weight;
+
+    return interpolated;
+}
+
+template<typename T>
+float yangle(const cv::Mat& img, const float& y, const float& x)
+{
+    int x0 = (int)std::floor(x);
+    assert((float)x0 == x);
+    int y0 = (int)std::floor(y);
+    int y1 =  y0 + 1;
+
+    float y0_weight = y1 - y;
+    float y1_weight = y - y0;
+
+    float a0 = img.at<T>(y0,x0);
+    float a1 = img.at<T>(y1,x0);
+
+    if (abs(a0-a1) < 180){
+        return a0 * y0_weight + a1 * y1_weight;
+    }else{
+        if(a0 < a1){
+            a0 += 360;
+        } else {
+            a1 += 360;
+        }
+        float inter = a0 * y0_weight + a1 * y1_weight;
+        if (inter >= 360){
+            inter -= 360;
+        }
+        return inter;
+    }
+}
+
+
+ProbabilityMapping::ProbabilityMapping(ORB_SLAM2::Map* pMap):mpMap(pMap)
+{
+    mbFinishRequested = false; //init
+    mbFinished = false;
+}
+
+void ProbabilityMapping::Run()
+{
+    while(1)
+    {
+        if(CheckFinish()) break;
+        //TestSemiDenseViewer();
+#ifdef OnlineLoop
+//        struct timespec start, finish
